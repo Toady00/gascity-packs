@@ -32,13 +32,14 @@ setup only. Do not edit source files in the launcher checkout.
    do-work root's `gc.root_store_ref` (`rig:<rig-name>`), which is
    `$GC_RIG_ROOT` when `$GC_RIG` equals `<rig-name>`, otherwise the `path` of
    `<rig-name>` from `gc rig list --json`. Hard-fail if `gc.root_store_ref` is
-   missing or not `rig:`-scoped. Do not read it from `gc.work_dir`, which gc
-   leaves unset or fills with an implementation worktree, and do not use `$(pwd)`:
-   the session's working directory is a pool slot, not the rig. Then create or reuse a
-   deterministic git worktree at `<launcher-rig-root>/worktrees/<source-anchor-id>`,
-   based on the up-to-date remote default branch — never the launcher's local
-   `HEAD`, which may be behind `origin`. Run the git commands below from
-   `<launcher-rig-root>`. If the path is missing:
+   missing or not `rig:`-scoped, or the rig is not registered. Do not read it
+   from `gc.work_dir`, which gc may leave unset or fill with an implementation
+   worktree, and do not use `$(pwd)`: the session's working directory is a pool
+   slot, not the rig. Then create or reuse a deterministic git worktree at
+   `<launcher-rig-root>/worktrees/<source-anchor-id>`, based on the up-to-date
+   remote default branch — never the launcher's local `HEAD`, which may be
+   behind `origin`. Run the git commands below from `<launcher-rig-root>`. If
+   the path is missing:
    - Resolve the remote default branch (do not hardcode `main`). Read the
      local ref first, and only touch the network if it is missing:
 

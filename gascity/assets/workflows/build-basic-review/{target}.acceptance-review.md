@@ -25,9 +25,11 @@ checkout.
 
 Contract: the launcher rig root is the registered path of the rig named by the
 workflow root bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when
-`$GC_RIG` equals `<rig-name>`, otherwise the `path` of `<rig-name>` from
-`gc rig list --json`. Do not read it from `gc.work_dir`, which gc leaves unset or
-fills with an implementation worktree, and do not use `$(pwd)`.
+`$GC_RIG` equals `<rig-name>`, otherwise the `path` of `<rig-name>` from `gc rig
+list --json`. Do not read it from `gc.work_dir`, which gc may leave unset or
+fill with an implementation worktree, and do not use `$(pwd)`. If
+`gc.root_store_ref` is missing or not `rig:`-scoped, or the rig is not
+registered, stop and report it instead of guessing a directory.
 
 Write findings under the build artifact root. Required findings must include
 the relevant requirement or task reference plus the file, command, or artifact

@@ -22,8 +22,15 @@ LAUNCHER_ROOT_ENV_IDENTITY = "`$GC_RIG` equals"
 LAUNCHER_ROOT_REGISTRY = "`gc rig list --json`"
 LAUNCHER_ROOT_NOT_WORK_DIR = "Do not read it from `gc.work_dir`"
 LAUNCHER_ROOT_NOT_CWD = "do not use `$(pwd)`"
+LAUNCHER_ROOT_FAIL_CLOSED = "stop and report it instead of guessing a directory"
 LAUNCHER_ROOT_RESOLVER = (
     '`"$(dirname "<gc.check_path>")/../launcher-root.sh" <workflow-root-id>`'
+)
+# A validator shadowed by a higher layer has no launcher-root.sh beside it;
+# the resolver-only prompts spell out the same rule for that case.
+LAUNCHER_ROOT_RESOLVER_FALLBACK = (
+    "If a city or pack layer shadows the validator so that no `launcher-root.sh` "
+    "sits beside `gc.check_path`, apply the same rule by hand"
 )
 LAUNCHER_ROOT_CONTRACT_FRAGMENTS = (
     LAUNCHER_ROOT_SOURCE,
@@ -32,7 +39,21 @@ LAUNCHER_ROOT_CONTRACT_FRAGMENTS = (
     LAUNCHER_ROOT_REGISTRY,
     LAUNCHER_ROOT_NOT_WORK_DIR,
     LAUNCHER_ROOT_NOT_CWD,
+    LAUNCHER_ROOT_FAIL_CLOSED,
 )
+
+
+def flat(text: str) -> str:
+    """Collapse prose line wrapping so a fragment can be pinned regardless of
+    where an 80-column reflow broke the sentence."""
+    return re.sub(r"\s+", " ", text)
+
+
+def assert_fragments_flat(case: unittest.TestCase, text: str, fragments, **subtest) -> None:
+    flattened = flat(text)
+    for fragment in fragments:
+        with case.subTest(fragment=fragment, **subtest):
+            case.assertIn(flat(fragment), flattened)
 
 
 FORMULAS = {
@@ -2046,11 +2067,11 @@ class FormulaAssetTests(unittest.TestCase):
             "normalized `gc.build.review.v1` artifact with `status: approved`",
             "Do not invoke provider-native subagents",
             "Implementation Worktrees",
-            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
             "Do not inspect or edit the launcher checkout",
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, asset_text)
+        assert_fragments_flat(self, asset_text, LAUNCHER_ROOT_CONTRACT_FRAGMENTS, asset="build-basic-review")
 
         requirements_text = (root / "assets/workflows/build-basic/requirements.md").read_text(
             encoding="utf-8"
@@ -2200,6 +2221,9 @@ class FormulaAssetTests(unittest.TestCase):
                 # root's gc.root_store_ref; root gc.work_dir is never read.
                 LAUNCHER_ROOT_RESOLVER,
                 "it reads the root's `gc.root_store_ref`, never `gc.work_dir`",
+                "fails closed on exit 1 or 75",
+                LAUNCHER_ROOT_RESOLVER_FALLBACK,
+                *LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1],
                 # The gate's validator is a pack asset, not a rig-local
                 # .gc/scripts copy: agents run the absolute path gc resolved
                 # onto the ralph control bead.
@@ -2253,9 +2277,7 @@ class FormulaAssetTests(unittest.TestCase):
                 self.assertIn("gc.build.code_review_context_path", text)
             with self.subTest(asset=asset_name, fragment="worktree section"):
                 self.assertIn("Implementation Worktrees", text)
-            for fragment in LAUNCHER_ROOT_CONTRACT_FRAGMENTS:
-                with self.subTest(asset=asset_name, fragment=fragment):
-                    self.assertIn(fragment, text)
+            assert_fragments_flat(self, text, LAUNCHER_ROOT_CONTRACT_FRAGMENTS, asset=asset_name)
 
         for asset_name, text in (
             ("acceptance", acceptance),
@@ -3686,23 +3708,26 @@ class FormulaAssetTests(unittest.TestCase):
             "do not use the synthetic drain-unit convoy id as `<source-anchor-id>`",
             "never persist `work_dir` on the synthetic drain-unit convoy",
             "hard-fail if the selected source anchor id equals the synthetic input convoy id",
-            # The worktree lives under the launcher rig, resolved from the
-            # root's store scope: the session cwd is a pool slot, not the rig.
-            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
-            "`<launcher-rig-root>/worktrees/<source-anchor-id>`",
             "git worktree add",
             "gc bd update <source-anchor-id> --set-metadata work_dir=",
             "Do not edit source files in the launcher checkout",
         ):
             with self.subTest(step="prepare-worktree", fragment=fragment):
                 self.assertIn(fragment, prepare)
+        # The worktree lives under the launcher rig, resolved from the root's
+        # store scope: the session cwd is a pool slot, not the rig.
+        assert_fragments_flat(self, prepare, (
+            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1],
+            "Hard-fail if `gc.root_store_ref` is missing or not `rig:`-scoped, or the rig is not registered",
+            "`<launcher-rig-root>/worktrees/<source-anchor-id>`",
+            "Run the git commands below from `<launcher-rig-root>`",
+        ), step="prepare-worktree")
 
         implement = node_description(root, steps["implement"])
         for fragment in (
             "Read `work_dir` from the source anchor",
             "never read `work_dir` from the synthetic drain-unit convoy",
             "Do not infer the source anchor from dependency ids",
-            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
             "if the JSON output is a one-element list, unwrap the",
             "verify `pwd -P` equals",
             "cd \"$WORKTREE\"",
@@ -3712,6 +3737,7 @@ class FormulaAssetTests(unittest.TestCase):
         ):
             with self.subTest(step="implement", fragment=fragment):
                 self.assertIn(fragment, implement)
+        assert_fragments_flat(self, implement, LAUNCHER_ROOT_CONTRACT_FRAGMENTS, step="implement")
 
         close_source = node_description(root, steps["close-source-anchor"])
         for fragment in (
@@ -3724,9 +3750,7 @@ class FormulaAssetTests(unittest.TestCase):
             "Read `work_dir` from the source anchor",
             "close only `<source-anchor-id>`",
             "handle both an object and a",
-            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
             "equals the launcher root",
-            "points at a worktree without the",
             "gc bd show <source-anchor-id> --json",
             "status=closed",
             "gc.outcome=pass",
@@ -3736,6 +3760,10 @@ class FormulaAssetTests(unittest.TestCase):
         ):
             with self.subTest(step="close-source-anchor", fragment=fragment):
                 self.assertIn(fragment, close_source)
+        assert_fragments_flat(self, close_source, (
+            *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
+            "points at a worktree without the",
+        ), step="close-source-anchor")
 
     def test_workflow_prompts_never_read_root_work_dir_as_launcher(self) -> None:
         """No stage reads the launcher from root `gc.work_dir` or from cwd.
@@ -3748,7 +3776,11 @@ class FormulaAssetTests(unittest.TestCase):
         derive the rig from the session's working directory.
         """
         root = pathlib.Path(__file__).resolve().parents[1]
-        workflows = sorted((root / "assets" / "workflows").rglob("*.md"))
+        repo = root.parent
+        # Every maintained pack's prompts, not only this one's: bmad, gstack
+        # and compound-engineering override do-work's implement step and
+        # would otherwise keep the broken sentence.
+        workflows = sorted(repo.glob("*/assets/workflows/**/*.md"))
         self.assertTrue(workflows)
         forbidden = (
             "`gc.work_dir` is the launcher",
@@ -3756,39 +3788,50 @@ class FormulaAssetTests(unittest.TestCase):
             "$(pwd)/worktrees",
         )
         for path in workflows:
-            text = path.read_text(encoding="utf-8")
-            relative = path.relative_to(root).as_posix()
+            text = flat(path.read_text(encoding="utf-8"))
+            relative = path.relative_to(repo).as_posix()
             for fragment in forbidden:
                 with self.subTest(asset=relative, forbidden=fragment):
                     self.assertNotIn(fragment, text)
 
         # Stages that act on the launcher (run the validator there, create the
         # worktree under it, or compare a worktree against it) must say how it
-        # is resolved: either the inline contract or the pack's resolver.
+        # is resolved: the inline contract, or the pack's resolver with the
+        # inline rule as its fallback for a shadowed validator.
         for relative_path in (
-            "assets/workflows/do-work/prepare-worktree.md",
-            "assets/workflows/do-work/implement.md",
-            "assets/workflows/do-work/close-source-anchor.md",
-            "assets/workflows/do-work-item/implement-item.md",
-            "assets/workflows/implementation-base/implement.md",
-            "assets/workflows/implementation-item-base/implement-item.md",
-            "assets/workflows/implement/summarize.md",
-            "assets/workflows/build-base/summarize-implementation.md",
-            "assets/workflows/build-basic-review/{target}.setup-build-basic-review.md",
-            "assets/workflows/build-basic-review/{target}.acceptance-review.md",
-            "assets/workflows/build-basic-review/{target}.test-evidence-review.md",
-            "assets/workflows/build-basic-review/{target}.simplicity-review.md",
-            "assets/workflows/build-basic-review/{target}.synthesize-review.md",
-            "assets/workflows/build-basic-review/{target}.apply-review-findings.md",
+            "gascity/assets/workflows/do-work/prepare-worktree.md",
+            "gascity/assets/workflows/do-work/implement.md",
+            "gascity/assets/workflows/do-work/close-source-anchor.md",
+            "gascity/assets/workflows/do-work-item/implement-item.md",
+            "gascity/assets/workflows/implementation-base/implement.md",
+            "gascity/assets/workflows/implementation-item-base/implement-item.md",
+            "gascity/assets/workflows/implement/summarize.md",
+            "gascity/assets/workflows/build-base/summarize-implementation.md",
+            "gascity/assets/workflows/build-basic-review/{target}.setup-build-basic-review.md",
+            "gascity/assets/workflows/build-basic-review/{target}.acceptance-review.md",
+            "gascity/assets/workflows/build-basic-review/{target}.test-evidence-review.md",
+            "gascity/assets/workflows/build-basic-review/{target}.simplicity-review.md",
+            "gascity/assets/workflows/build-basic-review/{target}.synthesize-review.md",
+            "gascity/assets/workflows/build-basic-review/{target}.apply-review-findings.md",
+            "bmad/assets/workflows/bmad-story-development/implement-story.md",
+            "bmad/assets/workflows/bmad-story-development/apply-story-findings.md",
+            "gstack/assets/workflows/gstack-work/implement.md",
+            "compound-engineering/assets/workflows/compound-work/implement.md",
         ):
-            text = (root / relative_path).read_text(encoding="utf-8")
-            resolves = all(fragment in text for fragment in LAUNCHER_ROOT_CONTRACT_FRAGMENTS)
-            delegates = LAUNCHER_ROOT_RESOLVER in text
+            text = flat((repo / relative_path).read_text(encoding="utf-8"))
+            core = [flat(f) for f in LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1]]
+            resolves = all(fragment in text for fragment in core)
+            delegates = LAUNCHER_ROOT_RESOLVER in text and flat(LAUNCHER_ROOT_RESOLVER_FALLBACK) in text
             with self.subTest(asset=relative_path):
                 self.assertTrue(
-                    resolves or delegates,
+                    resolves,
                     f"{relative_path} acts on the launcher rig root without the "
-                    "gc.root_store_ref contract or the launcher-root.sh resolver",
+                    "gc.root_store_ref contract",
+                )
+                self.assertTrue(
+                    delegates or flat(LAUNCHER_ROOT_FAIL_CLOSED) in text
+                    or "Hard-fail if `gc.root_store_ref` is missing" in text,
+                    f"{relative_path} does not say to fail closed when the launcher cannot be resolved",
                 )
 
     def test_pack_close_source_anchor_overrides_read_root_stamped_anchor(self) -> None:

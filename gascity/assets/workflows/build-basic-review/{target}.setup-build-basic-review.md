@@ -13,22 +13,24 @@ present an unchanged root checkout as a review failure when the source
 anchor/worktree contains the verified implementation.
 
 The review context must anchor every relative source path to the real
-implementation worktree, not the launcher checkout. The launcher rig root is
-the registered path of the rig named by the workflow root bead's
-`gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when `$GC_RIG` equals
-`<rig-name>`, otherwise the `path` of `<rig-name>` from `gc rig list --json`.
-Do not read it from `gc.work_dir`, which gc leaves unset or fills with an
-implementation worktree, and do not use `$(pwd)`. This path is only the factory
-launcher root and is not the code under review. Resolve implementation source
-anchors from the implementation summary `trace.upstream` entries whose paths are
-`beads/<source-anchor-id>`. For each source anchor, run
-`gc bd show "<source-anchor-id>" --json`, handle both an object and a one-element
-list, and read `metadata.work_dir`. Verify every `work_dir` is an absolute
-existing git worktree and is different from the launcher root. If metadata is
-missing but `<launcher-root>/worktrees/<source-anchor-id>` exists and is a git
-worktree, record that recovered worktree and include a setup warning in the
-context. If no implementation worktree can be resolved, close this setup bead
-with `gc.outcome=fail` and record the missing source-anchor/worktree evidence.
+implementation worktree, not the launcher checkout. The launcher rig root is the
+registered path of the rig named by the workflow root bead's `gc.root_store_ref`
+(`rig:<rig-name>`): `$GC_RIG_ROOT` when `$GC_RIG` equals `<rig-name>`, otherwise
+the `path` of `<rig-name>` from `gc rig list --json`. Do not read it from
+`gc.work_dir`, which gc may leave unset or fill with an implementation worktree,
+and do not use `$(pwd)`. If `gc.root_store_ref` is missing or not `rig:`-scoped,
+or the rig is not registered, stop and report it instead of guessing a
+directory. The launcher rig root is only the factory launcher root and is not
+the code under review. Resolve implementation source anchors from the
+implementation summary `trace.upstream` entries whose paths are
+`beads/<source-anchor-id>`. For each source anchor, run `gc bd show
+"<source-anchor-id>" --json`, handle both an object and a one-element list, and
+read `metadata.work_dir`. Verify every `work_dir` is an absolute existing git
+worktree and is different from the launcher root. If metadata is missing but
+`<launcher-root>/worktrees/<source-anchor-id>` exists and is a git worktree,
+record that recovered worktree and include a setup warning in the context. If no
+implementation worktree can be resolved, close this setup bead with
+`gc.outcome=fail` and record the missing source-anchor/worktree evidence.
 
 The context body must include an `## Implementation Worktrees` section before
 the artifact excerpts. For each source anchor include:

@@ -22,13 +22,16 @@ set -euo pipefail
 # Resolution order:
 #   1. `rig:<name>` from the root's gc.root_store_ref. city:/class: scopes and
 #      a missing reference fail closed; there is no single launcher rig.
-#   2. $GC_RIG_ROOT, only when $GC_RIG equals <name>. Rig-scoped sessions get
-#      both from gc, but the executing rig may legitimately differ from the
-#      rig that owns the workflow, and a city-scoped session has neither.
-#   3. The `path` registered for <name> in `gc rig list --json`.
+#   2. $GC_RIG_ROOT, only when $GC_RIG equals <name> and the value is an
+#      absolute directory. Rig-scoped sessions get both from gc, but the
+#      executing rig may legitimately differ from the rig that owns the
+#      workflow, and a city-scoped session has neither.
+#   3. The `path` registered for <name> in `gc rig list --json`, skipping the
+#      city's own `hq` entry, which that command lists first under the city
+#      name.
 #
-# Exit status: 0 resolved; 1 unresolvable (the message on stderr says why);
-# 75 when gc could not answer.
+# Exit status: 0 resolved; 1 unresolvable (the message on stderr says why,
+# including a bead gc reports as not found); 75 when gc could not answer.
 
 fail() {
   echo "launcher-root: $*" >&2
@@ -72,18 +75,31 @@ print(value if isinstance(value, str) else "")
 GC_ERR="$(mktemp)"
 trap 'rm -f "$GC_ERR"' EXIT INT TERM HUP
 
-SHOW_JSON="$(gc bd show "$BEAD_ID" --json 2>"$GC_ERR")" \
-  || fail_infra "gc bd show $BEAD_ID failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
+show_bead() {
+  # show_bead <id> -> prints `gc bd show <id> --json`; exits 1 when gc reports
+  # the bead as not found (a wrong id is a verdict, not an outage) and 75 when
+  # gc could not answer at all.
+  local out
+  if out="$(gc bd show "$1" --json 2>"$GC_ERR")"; then
+    printf '%s' "$out"
+    return 0
+  fi
+  if grep -qi 'not found' "$GC_ERR"; then
+    fail "bead $1 not found: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
+  fi
+  fail_infra "gc bd show $1 failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
+}
+
+SHOW_JSON="$(show_bead "$BEAD_ID")"
 ROOT_ID="$(metadata_value "$SHOW_JSON" "gc.root_bead_id")"
 ROOT_JSON="$SHOW_JSON"
 if [ -n "$ROOT_ID" ] && [ "$ROOT_ID" != "$BEAD_ID" ]; then
-  ROOT_JSON="$(gc bd show "$ROOT_ID" --json 2>"$GC_ERR")" \
-    || fail_infra "gc bd show $ROOT_ID failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
+  ROOT_JSON="$(show_bead "$ROOT_ID")"
 else
   ROOT_ID="$BEAD_ID"
 fi
 
-STORE_REF="$(metadata_value "$ROOT_JSON" "gc.root_store_ref")"
+STORE_REF="$(metadata_value "$ROOT_JSON" "gc.root_store_ref" | tr -d '[:space:]')"
 [ -n "$STORE_REF" ] || fail "workflow root $ROOT_ID has no gc.root_store_ref; cannot identify the launcher rig"
 case "$STORE_REF" in
   rig:?*) RIG_NAME="${STORE_REF#rig:}" ;;
@@ -91,37 +107,55 @@ case "$STORE_REF" in
 esac
 
 canonical_dir() {
-  # canonical_dir <path> -> prints the symlink-resolved absolute path, or fails
+  # canonical_dir <path> -> prints the symlink-resolved absolute path of an
+  # absolute directory, or fails. A relative value would resolve against the
+  # session's working directory, which is a pool slot, not the rig.
+  case "$1" in /*) ;; *) return 1 ;; esac
   [ -d "$1" ] || return 1
-  (cd "$1" 2>/dev/null && pwd -P)
+  (CDPATH= cd -- "$1" 2>/dev/null && pwd -P)
 }
 
-if [ "${GC_RIG:-}" = "$RIG_NAME" ] && [ -n "${GC_RIG_ROOT:-}" ]; then
+if [ "${GC_RIG:-}" = "$RIG_NAME" ]; then
+  [ -n "${GC_RIG_ROOT:-}" ] \
+    || fail "GC_RIG is $RIG_NAME but GC_RIG_ROOT is empty"
   canonical_dir "$GC_RIG_ROOT" \
-    || fail "GC_RIG_ROOT=$GC_RIG_ROOT for rig $RIG_NAME is not a directory"
+    || fail "GC_RIG_ROOT=$GC_RIG_ROOT for rig $RIG_NAME is not an absolute existing directory"
   exit 0
 fi
 
 RIG_LIST="$(gc rig list --json 2>"$GC_ERR")" \
   || fail_infra "gc rig list --json failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
-RIG_PATH="$(printf '%s' "$RIG_LIST" | python3 -c '
+RIG_LOOKUP="$(printf '%s' "$RIG_LIST" | python3 -c '
 import json
 import sys
 
+# Prints "<status>\t<path>": registered, unbound (registered without a path),
+# or missing. The city itself is listed first with hq=true under the city
+# name; it is not a rig and never a launcher.
 name = sys.argv[1]
 try:
     data = json.load(sys.stdin)
 except Exception:
-    print("")
+    print("missing\t")
     raise SystemExit(0)
 rigs = data.get("rigs") if isinstance(data, dict) else None
 for rig in rigs or []:
-    if isinstance(rig, dict) and rig.get("name") == name:
-        path = rig.get("path", "")
-        print(path if isinstance(path, str) else "")
-        raise SystemExit(0)
-print("")
+    if not isinstance(rig, dict) or rig.get("hq") or rig.get("name") != name:
+        continue
+    path = rig.get("path", "")
+    if isinstance(path, str) and path.strip():
+        print("registered\t" + path.strip())
+    else:
+        print("unbound\t")
+    raise SystemExit(0)
+print("missing\t")
 ' "$RIG_NAME")"
-[ -n "$RIG_PATH" ] || fail "rig $RIG_NAME from gc.root_store_ref on $ROOT_ID is not registered in this city (gc rig list --json)"
+RIG_STATUS="${RIG_LOOKUP%%	*}"
+RIG_PATH="${RIG_LOOKUP#*	}"
+case "$RIG_STATUS" in
+  registered) ;;
+  unbound) fail "rig $RIG_NAME from gc.root_store_ref on $ROOT_ID has no registered path (gc rig list --json)" ;;
+  *) fail "rig $RIG_NAME from gc.root_store_ref on $ROOT_ID is not registered in this city (gc rig list --json)" ;;
+esac
 canonical_dir "$RIG_PATH" \
-  || fail "registered path $RIG_PATH for rig $RIG_NAME is not a directory"
+  || fail "registered path $RIG_PATH for rig $RIG_NAME is not an absolute existing directory"

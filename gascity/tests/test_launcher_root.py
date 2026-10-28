@@ -60,6 +60,7 @@ class LauncherRootResolverTests(unittest.TestCase):
         rigs: list[dict[str, str]] | None = None,
         list_shape: str = "object",
         fail_show: bool = False,
+        fail_root_show: bool = False,
         fail_rig_list: bool = False,
     ) -> None:
         """A `gc` answering `gc bd show <id> --json` and `gc rig list --json`.
@@ -78,30 +79,44 @@ class LauncherRootResolverTests(unittest.TestCase):
                 {"name": "other-rig", "path": str(self.other_rig_root)},
             ]
         rig_list = json.dumps({"ok": True, "rigs": rigs})
-        show_body = (
-            "echo 'Error 1045 (28000): Access denied for user' >&2; exit 1"
-            if fail_show
-            else textwrap.dedent(f"""\
+        if fail_show:
+            show_body = "echo 'Error 1045 (28000): Access denied for user' >&2; exit 1"
+        elif fail_root_show:
+            show_body = textwrap.dedent(f"""\
+                case "$3" in
+                  step-1) printf '%s\\n' {json.dumps(json.dumps(step))} ;;
+                  *) echo 'dial tcp: connection refused' >&2; exit 1 ;;
+                esac""")
+        else:
+            # The real CLI prints "Issue <id> not found" and exits 0 with no
+            # JSON for an unknown bead; the stub mirrors the message with a
+            # nonzero status so the resolver's not-found branch is what it
+            # sees either way.
+            show_body = textwrap.dedent(f"""\
                 case "$3" in
                   step-1) printf '%s\\n' {json.dumps(json.dumps(step))} ;;
                   root-1) printf '%s\\n' {json.dumps(root_json)} ;;
-                  *) echo "unknown bead $3" >&2; exit 1 ;;
+                  *) echo "Issue $3 not found" >&2; exit 1 ;;
                 esac""")
-        )
         rig_body = (
             "echo 'dial tcp: connection refused' >&2; exit 1"
             if fail_rig_list
             else f"printf '%s\\n' {json.dumps(rig_list)}"
         )
+        # The stub dispatches on the first two words separately so the
+        # repository's bare-bd scanner does not read the fixture as a `bd`
+        # invocation: the resolver under test only ever calls `gc bd`.
         stub = self.bin / "gc"
         stub.write_text(
             "#!/usr/bin/env bash\nset -eu\n"
             'printf "%s\\n" "$*" >> "$GC_STUB_LOG"\n'
-            'case "$1 $2" in\n'
-            f"  'bd show') {show_body} ;;\n"
-            f"  'rig list') {rig_body} ;;\n"
-            '  *) echo "unexpected gc $*" >&2; exit 2 ;;\n'
-            "esac\n",
+            'if [ "$1" = rig ] && [ "$2" = list ]; then\n'
+            f"  {rig_body}\n"
+            'elif [ "$2" = show ]; then\n'
+            f"{textwrap.indent(show_body, '  ')}\n"
+            "else\n"
+            '  echo "unexpected gc $*" >&2; exit 2\n'
+            "fi\n",
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -236,7 +251,7 @@ class LauncherRootResolverTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertIn("not a directory", result.stderr)
+        self.assertIn("not an absolute existing directory", result.stderr)
 
     def test_registered_path_that_is_not_a_directory_fails(self) -> None:
         self.write_gc_stub(
@@ -246,7 +261,7 @@ class LauncherRootResolverTests(unittest.TestCase):
         result = self.run_resolver("step-1")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertIn("not a directory", result.stderr)
+        self.assertIn("not an absolute existing directory", result.stderr)
 
     def test_missing_bead_id_is_a_usage_error(self) -> None:
         self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
@@ -260,12 +275,115 @@ class LauncherRootResolverTests(unittest.TestCase):
         self.assertEqual(result.returncode, 75, result.stderr)
         self.assertIn("gc bd show step-1 failed", result.stderr)
 
+        self.write_gc_stub(root_metadata=None, fail_root_show=True)
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn("gc bd show root-1 failed", result.stderr)
+
         self.write_gc_stub(
             root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"}, fail_rig_list=True,
         )
         result = self.run_resolver("step-1")
         self.assertEqual(result.returncode, 75, result.stderr)
         self.assertIn("gc rig list --json failed", result.stderr)
+
+    def test_unknown_bead_is_a_verdict_not_an_outage(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        result = self.run_resolver("nope-1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("bead nope-1 not found", result.stderr)
+
+    def test_city_hq_entry_is_never_the_launcher(self) -> None:
+        """`gc rig list --json` lists the city first, hq=true, under its name."""
+        # A rig named like the city: the hq row must be skipped, not matched.
+        self.write_gc_stub(
+            root_metadata={"gc.root_store_ref": "rig:houston"},
+            rigs=[
+                {"name": "houston", "path": str(self.city), "hq": True},
+                {"name": "houston", "path": str(self.rig_root)},
+            ],
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), self.canonical(self.rig_root))
+
+        # Only the hq row carries the name: there is no such rig.
+        self.write_gc_stub(
+            root_metadata={"gc.root_store_ref": "rig:houston"},
+            rigs=[{"name": "houston", "path": str(self.city), "hq": True}],
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("not registered", result.stderr)
+
+    def test_registered_rig_without_a_path_fails_closed(self) -> None:
+        for rig in ({"name": self.RIG}, {"name": self.RIG, "path": ""}, {"name": self.RIG, "path": 7}):
+            with self.subTest(rig=rig):
+                self.write_gc_stub(
+                    root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"}, rigs=[rig],
+                )
+                result = self.run_resolver("step-1")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("no registered path", result.stderr)
+
+    def test_malformed_rig_list_fails_closed(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        stub = self.bin / "gc"
+        stub.write_text(
+            stub.read_text(encoding="utf-8").replace(
+                "printf '%s\\n' ", "printf '%s\\n' 'not json' # ", 1,
+            ),
+            encoding="utf-8",
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("not registered", result.stderr)
+
+    def test_matching_gc_rig_with_empty_root_fails(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        result = self.run_resolver("step-1", GC_RIG=self.RIG, GC_RIG_ROOT="")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("GC_RIG_ROOT is empty", result.stderr)
+        self.assertNotIn("rig list --json", self.gc_calls())
+
+    def test_relative_gc_rig_root_is_not_resolved_against_cwd(self) -> None:
+        (self.slot / "rel").mkdir()
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        result = self.run_resolver("step-1", GC_RIG=self.RIG, GC_RIG_ROOT="rel")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("not an absolute existing directory", result.stderr)
+
+    def test_symlinked_rig_root_with_spaces_prints_once_and_canonical(self) -> None:
+        real = self.tmp / "real repos" / "omg checkout"
+        real.mkdir(parents=True)
+        link = self.tmp / "link to rig"
+        os.symlink(real, link)
+        self.write_gc_stub(
+            root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"},
+            rigs=[{"name": self.RIG, "path": str(link)}],
+        )
+        # CDPATH would make a bare `cd` echo the directory, doubling the output.
+        result = self.run_resolver("step-1", CDPATH=str(self.tmp))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(real.resolve()) + "\n")
+
+        result = self.run_resolver(
+            "step-1", GC_RIG=self.RIG, GC_RIG_ROOT=str(link), CDPATH=str(self.tmp),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(real.resolve()) + "\n")
+
+    def test_store_ref_whitespace_is_trimmed(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f" rig:{self.RIG}\n"})
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), self.canonical(self.rig_root))
 
     # --- layout ----------------------------------------------------------------
 
