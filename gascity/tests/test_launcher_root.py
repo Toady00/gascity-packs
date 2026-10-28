@@ -314,6 +314,34 @@ class LauncherRootResolverTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertNotIn("bead step-1 not found", result.stderr)
 
+    def test_fetch_error_with_not_found_body_is_an_outage(self) -> None:
+        """bd prints the "no issues found" body after a fetch error as well."""
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        body = json.dumps({"error": "no issues found matching the provided IDs"})
+        stub = self.bin / "gc"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "echo 'Error fetching step-1: dial tcp 127.0.0.1:3307: connect: connection refused' >&2\n"
+            f"printf '%s\\n' {json.dumps(body)}; exit 1\n",
+            encoding="utf-8",
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn("connection refused", result.stderr)
+        self.assertNotIn("bead step-1 not found", result.stderr)
+
+    def test_not_found_body_alone_is_a_verdict(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        body = json.dumps({"error": "no issues found matching the provided IDs"})
+        stub = self.bin / "gc"
+        stub.write_text(
+            "#!/usr/bin/env bash\n" f"printf '%s\\n' {json.dumps(body)}; exit 1\n",
+            encoding="utf-8",
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("bead step-1 not found", result.stderr)
+
     def test_empty_show_output_is_an_outage(self) -> None:
         self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
         stub = self.bin / "gc"

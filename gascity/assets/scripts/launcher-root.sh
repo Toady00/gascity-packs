@@ -87,9 +87,12 @@ show_bead() {
     printf '%s' "$out"
     return 0
   fi
+  # bd prints the same "no issues found" body after a fetch error too, so the
+  # body alone is not a verdict when stderr reports one.
   if grep -qF "Issue $1 not found" "$GC_ERR" \
-    || printf '%s' "$out" | grep -qF '"error": "no issues found matching'; then
-    fail "bead $1 not found (gc bd show $1 --json)"
+    || { printf '%s' "$out" | grep -qF '"error": "no issues found matching' \
+         && ! grep -qF "Error fetching $1:" "$GC_ERR"; }; then
+    fail "bead $1 not found: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
   fi
   fail_infra "gc bd show $1 failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
 }
