@@ -37,14 +37,15 @@ When reading beads with `gc bd show --json`, handle both an object and a
 one-element list before reading metadata. The launcher rig root is the
 registered path of the rig named by the workflow root bead's `gc.root_store_ref`
 (`rig:<rig-name>`): `$GC_RIG_ROOT` when `$GC_RIG` equals `<rig-name>`, otherwise
-the `path` of `<rig-name>` from `gc rig list --json`. Do not read it from
-`gc.work_dir`, which gc may leave unset or fill with an implementation worktree,
-and do not use `$(pwd)`. If `gc.root_store_ref` is missing or not `rig:`-scoped,
-or the rig is not registered, stop and report it instead of guessing a
-directory. If the source anchor `work_dir` (or, in the unstamped single-item
-case above, the input convoy's) is missing, equals the launcher root, or points
-at a worktree without the implementation commit, fail this step instead of
-closing the source anchor.
+the `path` of the `<rig-name>` entry in `gc rig list --json` that is not the
+city's own `hq` entry; the result must be an absolute existing directory. Do not
+read it from `gc.work_dir`, which gc may leave unset or fill with an
+implementation worktree, and do not use `$(pwd)`. If `gc.root_store_ref` is
+missing or not `rig:`-scoped, or the rig is not registered, stop and report it
+instead of guessing a directory. If the source anchor `work_dir` (or, in the
+unstamped single-item case above, the input convoy's) is missing, equals the
+launcher root, or points at a worktree without the implementation commit, fail
+this step instead of closing the source anchor.
 
 If the source anchor is already `status=closed` with `gc.outcome=pass` (a retry
 of this step after the close landed), do not close it again; verify the

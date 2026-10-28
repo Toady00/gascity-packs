@@ -217,9 +217,11 @@ The launcher rig root, where build artifacts live and where an agent self-runs
 the validator, is the registered path of the rig the workflow was slung into.
 Gas City stamps that rig on every graph.v2 workflow root as `gc.root_store_ref`
 (`rig:<rig-name>`), and prompts resolve the launcher from it: `$GC_RIG_ROOT`
-when `$GC_RIG` equals `<rig-name>`, otherwise the `path` of `<rig-name>` from
-`gc rig list --json`, failing closed on a `city:`/`class:` scope or an
-unregistered rig. `assets/scripts/launcher-root.sh <bead-id>` implements that
+when `$GC_RIG` equals `<rig-name>`, otherwise the `path` of the `<rig-name>`
+entry in `gc rig list --json` that is not the city's own `hq` entry (that
+command lists the city first under its own name); the result must be an
+absolute existing directory, and resolution fails closed on a `city:`/`class:`
+scope, an unregistered rig, or a missing directory. `assets/scripts/launcher-root.sh <bead-id>` implements that
 rule for the validation stages, which locate it beside the validator's
 `gc.check_path`; a layer that shadows `build-artifact-valid.sh` without
 shipping `launcher-root.sh` next to it leaves agents on the inline rule, which

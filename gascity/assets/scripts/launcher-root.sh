@@ -76,16 +76,20 @@ GC_ERR="$(mktemp)"
 trap 'rm -f "$GC_ERR"' EXIT INT TERM HUP
 
 show_bead() {
-  # show_bead <id> -> prints `gc bd show <id> --json`; exits 1 when gc reports
-  # the bead as not found (a wrong id is a verdict, not an outage) and 75 when
-  # gc could not answer at all.
-  local out
-  if out="$(gc bd show "$1" --json 2>"$GC_ERR")"; then
+  # show_bead <id> -> prints `gc bd show <id> --json`. A wrong id is a verdict,
+  # not an outage: bd answers it with exit 1, "Issue <id> not found" on stderr
+  # and a JSON error body on stdout, and that exits 1 here. Any other failure
+  # (store unreachable, bd missing, a database "not found") exits 75.
+  local out status=0
+  out="$(gc bd show "$1" --json 2>"$GC_ERR")" || status=$?
+  if [ "$status" -eq 0 ]; then
+    [ -n "$out" ] || fail_infra "gc bd show $1 printed nothing"
     printf '%s' "$out"
     return 0
   fi
-  if grep -qi 'not found' "$GC_ERR"; then
-    fail "bead $1 not found: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
+  if grep -qF "Issue $1 not found" "$GC_ERR" \
+    || printf '%s' "$out" | grep -qF '"error": "no issues found matching'; then
+    fail "bead $1 not found (gc bd show $1 --json)"
   fi
   fail_infra "gc bd show $1 failed: $(tail -c 400 "$GC_ERR" | tr '\n' ' ')"
 }
@@ -99,7 +103,8 @@ else
   ROOT_ID="$BEAD_ID"
 fi
 
-STORE_REF="$(metadata_value "$ROOT_JSON" "gc.root_store_ref" | tr -d '[:space:]')"
+# Trim only the ends: an interior character is part of the rig's identity.
+STORE_REF="$(metadata_value "$ROOT_JSON" "gc.root_store_ref" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 [ -n "$STORE_REF" ] || fail "workflow root $ROOT_ID has no gc.root_store_ref; cannot identify the launcher rig"
 case "$STORE_REF" in
   rig:?*) RIG_NAME="${STORE_REF#rig:}" ;;
@@ -142,9 +147,11 @@ rigs = data.get("rigs") if isinstance(data, dict) else None
 for rig in rigs or []:
     if not isinstance(rig, dict) or rig.get("hq") or rig.get("name") != name:
         continue
+    # The registered path is used exactly as recorded; trimming it could
+    # name a different directory.
     path = rig.get("path", "")
     if isinstance(path, str) and path.strip():
-        print("registered\t" + path.strip())
+        print("registered\t" + path)
     else:
         print("unbound\t")
     raise SystemExit(0)

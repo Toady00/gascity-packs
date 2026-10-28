@@ -19,7 +19,8 @@ import unittest
 LAUNCHER_ROOT_SOURCE = "`gc.root_store_ref` (`rig:<rig-name>`)"
 LAUNCHER_ROOT_ENV_RULE = "`$GC_RIG_ROOT` when"
 LAUNCHER_ROOT_ENV_IDENTITY = "`$GC_RIG` equals"
-LAUNCHER_ROOT_REGISTRY = "`gc rig list --json`"
+LAUNCHER_ROOT_REGISTRY = "entry in `gc rig list --json` that is not the city's own `hq` entry"
+LAUNCHER_ROOT_ABSOLUTE = "the result must be an absolute existing directory"
 LAUNCHER_ROOT_NOT_WORK_DIR = "Do not read it from `gc.work_dir`"
 LAUNCHER_ROOT_NOT_CWD = "do not use `$(pwd)`"
 LAUNCHER_ROOT_FAIL_CLOSED = "stop and report it instead of guessing a directory"
@@ -37,6 +38,7 @@ LAUNCHER_ROOT_CONTRACT_FRAGMENTS = (
     LAUNCHER_ROOT_ENV_RULE,
     LAUNCHER_ROOT_ENV_IDENTITY,
     LAUNCHER_ROOT_REGISTRY,
+    LAUNCHER_ROOT_ABSOLUTE,
     LAUNCHER_ROOT_NOT_WORK_DIR,
     LAUNCHER_ROOT_NOT_CWD,
     LAUNCHER_ROOT_FAIL_CLOSED,
@@ -2222,8 +2224,10 @@ class FormulaAssetTests(unittest.TestCase):
                 LAUNCHER_ROOT_RESOLVER,
                 "it reads the root's `gc.root_store_ref`, never `gc.work_dir`",
                 "fails closed on exit 1 or 75",
+                "do not set `gc.outcome=pass`",
+                "close the step with `gc.outcome=fail`",
                 LAUNCHER_ROOT_RESOLVER_FALLBACK,
-                *LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1],
+                *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
                 # The gate's validator is a pack asset, not a rig-local
                 # .gc/scripts copy: agents run the absolute path gc resolved
                 # onto the ralph control bead.
@@ -3750,7 +3754,6 @@ class FormulaAssetTests(unittest.TestCase):
             "Read `work_dir` from the source anchor",
             "close only `<source-anchor-id>`",
             "handle both an object and a",
-            "equals the launcher root",
             "gc bd show <source-anchor-id> --json",
             "status=closed",
             "gc.outcome=pass",
@@ -3762,6 +3765,7 @@ class FormulaAssetTests(unittest.TestCase):
                 self.assertIn(fragment, close_source)
         assert_fragments_flat(self, close_source, (
             *LAUNCHER_ROOT_CONTRACT_FRAGMENTS,
+            "equals the launcher root",
             "points at a worktree without the",
         ), step="close-source-anchor")
 
@@ -3819,20 +3823,24 @@ class FormulaAssetTests(unittest.TestCase):
             "compound-engineering/assets/workflows/compound-work/implement.md",
         ):
             text = flat((repo / relative_path).read_text(encoding="utf-8"))
-            core = [flat(f) for f in LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1]]
-            resolves = all(fragment in text for fragment in core)
-            delegates = LAUNCHER_ROOT_RESOLVER in text and flat(LAUNCHER_ROOT_RESOLVER_FALLBACK) in text
+            fail_closed = (
+                flat(LAUNCHER_ROOT_FAIL_CLOSED) in text
+                or "Hard-fail if `gc.root_store_ref` is missing" in text
+            )
             with self.subTest(asset=relative_path):
+                for fragment in LAUNCHER_ROOT_CONTRACT_FRAGMENTS[:-1]:
+                    self.assertIn(
+                        flat(fragment), text,
+                        f"{relative_path} acts on the launcher rig root without the "
+                        f"gc.root_store_ref contract fragment {fragment!r}",
+                    )
                 self.assertTrue(
-                    resolves,
-                    f"{relative_path} acts on the launcher rig root without the "
-                    "gc.root_store_ref contract",
-                )
-                self.assertTrue(
-                    delegates or flat(LAUNCHER_ROOT_FAIL_CLOSED) in text
-                    or "Hard-fail if `gc.root_store_ref` is missing" in text,
+                    fail_closed,
                     f"{relative_path} does not say to fail closed when the launcher cannot be resolved",
                 )
+                if LAUNCHER_ROOT_RESOLVER in text:
+                    self.assertIn(flat(LAUNCHER_ROOT_RESOLVER_FALLBACK), text, relative_path)
+                    self.assertIn("close the step with `gc.outcome=fail`", text, relative_path)
 
     def test_pack_close_source_anchor_overrides_read_root_stamped_anchor(self) -> None:
         gascity_root = pathlib.Path(__file__).resolve().parents[1]

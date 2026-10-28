@@ -88,15 +88,15 @@ class LauncherRootResolverTests(unittest.TestCase):
                   *) echo 'dial tcp: connection refused' >&2; exit 1 ;;
                 esac""")
         else:
-            # The real CLI prints "Issue <id> not found" and exits 0 with no
-            # JSON for an unknown bead; the stub mirrors the message with a
-            # nonzero status so the resolver's not-found branch is what it
-            # sees either way.
+            # An unknown bead is answered the way `gc bd show --json` really
+            # answers it: exit 1, "Issue <id> not found" on stderr and a JSON
+            # error body on stdout.
+            not_found = json.dumps({"error": "no issues found matching the provided IDs"})
             show_body = textwrap.dedent(f"""\
                 case "$3" in
                   step-1) printf '%s\\n' {json.dumps(json.dumps(step))} ;;
                   root-1) printf '%s\\n' {json.dumps(root_json)} ;;
-                  *) echo "Issue $3 not found" >&2; exit 1 ;;
+                  *) echo "Issue $3 not found" >&2; printf '%s\\n' {json.dumps(not_found)}; exit 1 ;;
                 esac""")
         rig_body = (
             "echo 'dial tcp: connection refused' >&2; exit 1"
@@ -112,7 +112,7 @@ class LauncherRootResolverTests(unittest.TestCase):
             'printf "%s\\n" "$*" >> "$GC_STUB_LOG"\n'
             'if [ "$1" = rig ] && [ "$2" = list ]; then\n'
             f"  {rig_body}\n"
-            'elif [ "$2" = show ]; then\n'
+            'elif [ "$1" = bd ] && [ "$2" = show ]; then\n'
             f"{textwrap.indent(show_body, '  ')}\n"
             "else\n"
             '  echo "unexpected gc $*" >&2; exit 2\n'
@@ -293,6 +293,53 @@ class LauncherRootResolverTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertIn("bead nope-1 not found", result.stderr)
+
+    def test_infrastructure_errors_mentioning_not_found_still_exit_75(self) -> None:
+        """Only bd's own "Issue <id> not found" is a verdict about the bead."""
+        for message in (
+            'Error fetching root-1: dolt database "open-mardi-gras" not found',
+            'exec: "bd": executable file not found in $PATH',
+            "Issue other-9 not found",
+        ):
+            with self.subTest(message=message):
+                self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+                stub = self.bin / "gc"
+                stub.write_text(
+                    "#!/usr/bin/env bash\n"
+                    f"echo {json.dumps(message)} >&2; exit 1\n",
+                    encoding="utf-8",
+                )
+                result = self.run_resolver("step-1", GC_STUB_LOG=str(self.tmp / "unused.log"))
+                self.assertEqual(result.returncode, 75, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("bead step-1 not found", result.stderr)
+
+    def test_empty_show_output_is_an_outage(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"})
+        stub = self.bin / "gc"
+        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_interior_whitespace_in_store_ref_is_part_of_the_name(self) -> None:
+        self.write_gc_stub(root_metadata={"gc.root_store_ref": "rig:open- mardi-gras"})
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("not registered", result.stderr)
+
+    def test_registered_path_is_used_exactly_as_recorded(self) -> None:
+        trailing = self.tmp / "repos" / "repo "
+        trailing.mkdir()
+        (self.tmp / "repos" / "repo").mkdir()
+        self.write_gc_stub(
+            root_metadata={"gc.root_store_ref": f"rig:{self.RIG}"},
+            rigs=[{"name": self.RIG, "path": str(trailing)}],
+        )
+        result = self.run_resolver("step-1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(trailing.resolve()) + "\n")
 
     def test_city_hq_entry_is_never_the_launcher(self) -> None:
         """`gc rig list --json` lists the city first, hq=true, under its name."""
