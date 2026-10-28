@@ -28,10 +28,17 @@ setup only. Do not edit source files in the launcher checkout.
      id resolved above; hard-fail on a mismatch instead of overwriting it
 3. Validate context path {{context_path}}, files ownership, and verification
    policy for the resolved source anchor.
-4. Create or reuse a deterministic git worktree at
-   `$(pwd)/worktrees/<source-anchor-id>`, based on the up-to-date remote
-   default branch — never the launcher's local `HEAD`, which may be behind
-   `origin`. If the path is missing:
+4. Resolve the launcher rig root: the registered path of the rig named by the
+   do-work root's `gc.root_store_ref` (`rig:<rig-name>`), which is
+   `$GC_RIG_ROOT` when `$GC_RIG` equals `<rig-name>`, otherwise the `path` of
+   `<rig-name>` from `gc rig list --json`. Hard-fail if `gc.root_store_ref` is
+   missing or not `rig:`-scoped. Do not read it from `gc.work_dir`, which gc
+   leaves unset or fills with an implementation worktree, and do not use `$(pwd)`:
+   the session's working directory is a pool slot, not the rig. Then create or reuse a
+   deterministic git worktree at `<launcher-rig-root>/worktrees/<source-anchor-id>`,
+   based on the up-to-date remote default branch — never the launcher's local
+   `HEAD`, which may be behind `origin`. Run the git commands below from
+   `<launcher-rig-root>`. If the path is missing:
    - Resolve the remote default branch (do not hardcode `main`). Read the
      local ref first, and only touch the network if it is missing:
 

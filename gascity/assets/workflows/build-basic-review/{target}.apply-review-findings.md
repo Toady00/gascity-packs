@@ -15,7 +15,7 @@ record a no-op fix summary and set `code_review.verdict=done`.
 
 Before editing or running proof commands, read `gc.build.code_review_context_path`
 from the workflow root bead and use its `## Implementation Worktrees` section as
-the authority for writable code. `gc.work_dir` is the launcher rig root, not the
+the authority for writable code. The launcher rig root is not the
 implementation worktree. Do not inspect or edit the launcher checkout. Select
 the implementation worktree for each finding from the source anchor/worktree
 recorded in the review context, run `cd "$WORKTREE"`, and verify `pwd -P` equals
@@ -26,7 +26,11 @@ worktree evidence and do not patch the launcher root. If multiple worktrees are
 listed and a finding is ambiguous, leave it as iterate until the owning worktree
 is explicit.
 
-Contract: `gc.work_dir` is the launcher rig root, not the implementation worktree.
+Contract: the launcher rig root is the registered path of the rig named by the
+workflow root bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when
+`$GC_RIG` equals `<rig-name>`, otherwise the `path` of `<rig-name>` from
+`gc rig list --json`. Do not read it from `gc.work_dir`, which gc leaves unset or
+fills with an implementation worktree, and do not use `$(pwd)`.
 
 Set `code_review.verdict=done` only when acceptance, test evidence, and
 simplicity all approve after this pass. Set `code_review.verdict=iterate` when

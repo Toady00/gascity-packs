@@ -13,8 +13,12 @@ present an unchanged root checkout as a review failure when the source
 anchor/worktree contains the verified implementation.
 
 The review context must anchor every relative source path to the real
-implementation worktree, not the launcher checkout. Read the launcher rig root
-from the workflow root bead's `gc.work_dir`; this path is only the factory
+implementation worktree, not the launcher checkout. The launcher rig root is
+the registered path of the rig named by the workflow root bead's
+`gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when `$GC_RIG` equals
+`<rig-name>`, otherwise the `path` of `<rig-name>` from `gc rig list --json`.
+Do not read it from `gc.work_dir`, which gc leaves unset or fills with an
+implementation worktree, and do not use `$(pwd)`. This path is only the factory
 launcher root and is not the code under review. Resolve implementation source
 anchors from the implementation summary `trace.upstream` entries whose paths are
 `beads/<source-anchor-id>`. For each source anchor, run

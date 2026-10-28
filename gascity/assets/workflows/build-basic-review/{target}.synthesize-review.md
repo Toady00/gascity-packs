@@ -12,7 +12,11 @@ implementation worktree, never the launcher checkout. Required fixes must be
 specific enough for the fix lane to act without guessing which worktree owns the
 file.
 
-Contract: `gc.work_dir` is the launcher rig root, not the implementation worktree.
+Contract: the launcher rig root is the registered path of the rig named by the
+workflow root bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when
+`$GC_RIG` equals `<rig-name>`, otherwise the `path` of `<rig-name>` from
+`gc rig list --json`. Do not read it from `gc.work_dir`, which gc leaves unset or
+fills with an implementation worktree, and do not use `$(pwd)`.
 
 Write one starter review synthesis under the build artifact root. The synthesis
 must be short enough for a first-time factory user to scan, but concrete enough
