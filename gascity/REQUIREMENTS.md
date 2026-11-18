@@ -230,6 +230,25 @@ gate's first stderr line as the hold reason, so a validator puts the
 interpreter, `HOME`, and `PYTHONUSERBASE` it saw on that line and the remedy on
 the next.
 
+The launcher rig root, where build artifacts live and where an agent self-runs
+the validator, is the registered path of the rig the workflow was slung into.
+Gas City stamps that rig on every graph.v2 workflow root as `gc.root_store_ref`
+(`rig:<rig-name>`), and prompts resolve the launcher from it: `$GC_RIG_ROOT`
+when `$GC_RIG` equals `<rig-name>`, otherwise the `path` of the `<rig-name>`
+entry in `gc rig list --json` that is not the city's own `hq` entry (that
+command lists the city first under its own name); the result must be an absolute
+existing directory, and resolution fails closed on a `city:`/`class:` scope, an
+unregistered rig, or a missing directory.
+`assets/scripts/launcher-root.sh <bead-id>` implements that rule for the
+validation stages, which locate it beside the validator's `gc.check_path`; a
+layer that shadows `build-artifact-valid.sh` without shipping `launcher-root.sh`
+next to it leaves agents on the inline rule, which the prompts also state.
+Prompts never take the launcher from the root's `gc.work_dir`: Gas City treats
+that key as executor metadata, a pooled worker does not stamp it on the root,
+and a separate-drain child root inherits the drain member's implementation
+worktree into it. They never take it from the session's working directory
+either, which is a pool slot.
+
 Derived packs may add stricter methodology-specific schemas or extension fields,
 but they must not relax the base schema or replace required base sections,
 fields, statuses, traceability, or coverage.

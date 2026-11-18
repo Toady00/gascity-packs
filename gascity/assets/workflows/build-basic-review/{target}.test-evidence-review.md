@@ -7,14 +7,21 @@ plan.
 
 Before evaluating proof, read `gc.build.code_review_context_path` from the
 workflow root bead and use its `## Implementation Worktrees` section as the
-authority for where commands must run. `gc.work_dir` is the launcher rig root,
-not the implementation worktree. Do not run evidence commands from the launcher
+authority for where commands must run. The launcher rig root is not the
+implementation worktree. Do not run evidence commands from the launcher
 checkout. Resolve relative command paths against the listed implementation
 worktree, run `cd "$WORKTREE"`, and verify `pwd -P` equals that worktree before
 executing proof commands. If the context is missing a usable implementation
 worktree, write an iterate finding against review setup.
 
-Contract: `gc.work_dir` is the launcher rig root, not the implementation worktree.
+Contract: the launcher rig root is the registered path of the rig named by the
+workflow root bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when
+`$GC_RIG` equals `<rig-name>`, otherwise the `path` of the `<rig-name>` entry in
+`gc rig list --json` that is not the city's own `hq` entry; the result must be
+an absolute existing directory. Do not read it from `gc.work_dir`, which gc may
+leave unset or fill with an implementation worktree, and do not use `$(pwd)`. If
+`gc.root_store_ref` is missing or not `rig:`-scoped, or the rig is not
+registered, stop and report it instead of guessing a directory.
 
 Write concrete findings under the build artifact root. Distinguish missing
 proof from real product defects so the fix lane can either run the missing

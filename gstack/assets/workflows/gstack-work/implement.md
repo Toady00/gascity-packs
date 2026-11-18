@@ -10,9 +10,17 @@ Resolve the source anchor as the workflow root's stamped `gc.source_anchor_id`
 `prepare-worktree` step), read `work_dir` from the source anchor, validate that
 it is an absolute existing git worktree, set `WORKTREE` to that path, and
 `cd "$WORKTREE"` before reading or editing source files. If `work_dir` is
-missing, invalid, or points at the launcher checkout, fail before editing.
-`gc.work_dir` is the launcher rig root, not the implementation worktree; do not
-edit, test, or commit in the launcher checkout.
+missing, invalid, or points at the launcher checkout, fail before editing. The
+launcher rig root is the registered path of the rig named by the workflow root
+bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when `$GC_RIG`
+equals `<rig-name>`, otherwise the `path` of the `<rig-name>` entry in
+`gc rig list --json` that is not the city's own `hq` entry; the result must be
+an absolute existing directory. Do not read it from `gc.work_dir`, which gc may
+leave unset or fill with an implementation worktree, and do not use `$(pwd)`. If
+`gc.root_store_ref` is missing or not `rig:`-scoped, or the rig is not
+registered, stop and report it instead of guessing a directory. The launcher rig
+root is not the implementation worktree; do not edit, test, or commit in the
+launcher checkout.
 
 Implement only the owned source anchor boundary, run focused verification from
 inside the worktree, then make a focused commit in the worktree (`git add` the

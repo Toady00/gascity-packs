@@ -7,13 +7,20 @@ that a new factory user can understand and act on.
 
 Before inspecting files, read `gc.build.code_review_context_path` from the
 workflow root bead and use its `## Implementation Worktrees` section as the
-authority for code under review. `gc.work_dir` is the launcher rig root, not the
+authority for code under review. The launcher rig root is not the
 implementation worktree. Do not inspect or edit the launcher checkout. Resolve
 relative file paths against the listed implementation worktree, run
 `cd "$WORKTREE"`, and verify `pwd -P` equals that worktree before running any
 command.
 
-Contract: `gc.work_dir` is the launcher rig root, not the implementation worktree.
+Contract: the launcher rig root is the registered path of the rig named by the
+workflow root bead's `gc.root_store_ref` (`rig:<rig-name>`): `$GC_RIG_ROOT` when
+`$GC_RIG` equals `<rig-name>`, otherwise the `path` of the `<rig-name>` entry in
+`gc rig list --json` that is not the city's own `hq` entry; the result must be
+an absolute existing directory. Do not read it from `gc.work_dir`, which gc may
+leave unset or fill with an implementation worktree, and do not use `$(pwd)`. If
+`gc.root_store_ref` is missing or not `rig:`-scoped, or the rig is not
+registered, stop and report it instead of guessing a directory.
 
 Write findings under the build artifact root. Required findings must be tied to
 specific changed files or artifacts and must explain the smallest useful fix.
